@@ -2,12 +2,18 @@
 
 # '(")(?:[^"\\]|\\.)*(")' -> use rg
 
+def extract_keys_and_values_from_json [
+    path_to_json: string
+] {
+    rg -o -e '"(?:[^"\\]|\\.)*"' $path_to_json | lines | each {str trim -c '"'}
+}
+
 def extract_paths [
     path_to_json: string
     basedir: string
     relative_path: string
 ] {
-    let keys_and_values = (rg -o -e '"(?:[^"\\]|\\.)*"' $path_to_json | lines | each {str trim -c '"'})
+    let keys_and_values = extract_keys_and_values_from_json $path_to_json
     let paths = []
     for v in $keys_and_values {
         let relative_potential_path = do -i {$v | path relative-to $relative_path}
@@ -30,14 +36,37 @@ def remove_playlists [
     let module = open $module_path
     let module_base_dir = ($module_path | path dirname)
 
+    # Remove Playlist packs
     for playlist_packs in ($module.packs | where entity == Playlist) {
         let path_to_pack = ($module_base_dir | path join $playlist_packs.path)
         let playlist_paths = extract_paths $path_to_pack $module_base_dir $"modules/($module.name)"
-        print $playlist_paths
+        # Remove files
+        verbose_remove_files $playlist_paths
+        rm --force $path_to_pack
     }
+    # Remove entries from module.json
+    $module | update packs ($module.packs | where entity != Playlist) | save --force $module_path
+    
+    # Remove playlists embedded in adventures
+    for adventure_pack in ($module.packs | where entity == Adventure) {
+        let path_to_pack = ($module_base_dir | path join $adventure_pack)
+        let adventure = (open $path_to_pack | from json)
+        if "playlists" in $adventure {
+            $adventure.playlists | save --force /tmp/adventure_playlist.json
+            let playlist_paths = extract_paths /tmp/adventure_playlist.json $module_base_dir $"modules/($module.name)"
+            # Remove playlist files
+            verbose_remove_files $playlist_paths
+            $adventure | update playlists [] | save --force $path_to_pack
+        }
+    }
+}
 
-    for adventure_packs in ($module.packs | where entity == Adventure) {
-
+def verbose_remove_files [
+    list_of_files
+] {
+    for file in $list_of_files {
+        print $"Remove: ($file)"
+        rm --force $file
     }
 }
 
