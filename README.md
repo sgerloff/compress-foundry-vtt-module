@@ -14,6 +14,7 @@ Afterwards you can easily install the necessary programs:
 ```bash
 cargo install nu
 cargo install sd
+cargo install fd-find
 cargo install ripgrep
 cargo install urlencode
 ```
