@@ -5,7 +5,7 @@
 def extract_keys_and_values_from_json [
     path_to_json: string
 ] {
-    rg -o -e '"(?:[^"\\]|\\.)*"' $path_to_json | lines | each {str trim -c '"'}
+    rg -o -e '"(?:[^"\\]|\\.)*"' $path_to_json | lines | each {str trim -c '"' | str replace -a "%20" " "}
 }
 
 def extract_paths [
@@ -14,15 +14,14 @@ def extract_paths [
     relative_path: string
 ] {
     let keys_and_values = extract_keys_and_values_from_json $path_to_json
-    let paths = []
+    mut paths = []
     for v in $keys_and_values {
         let relative_potential_path = do -i {$v | path relative-to $relative_path}
         if ($relative_potential_path | describe | str contains string) {
             let potential_path = ($basedir | path join $relative_potential_path)
-            print $potential_path
             if ($potential_path | path exists) {
                 if ($potential_path | path type | $in == file) {
-                    $paths | append $potential_path
+                    $paths = ($paths | append $potential_path)
                 }
             }
         }
@@ -48,9 +47,7 @@ def remove_playlists [
     # Remove Playlist packs
     for playlist_packs in ($module.packs | where entity == Playlist) {
         let path_to_pack = ($module_base_dir | path join $playlist_packs.path)
-        print $"Process pack: ($path_to_pack)"
         let playlist_paths = extract_paths $path_to_pack $module_base_dir $"modules/($module.name)"
-        print $"Found paths: ($playlist_paths)"
         # Remove files
         verbose_remove_files $playlist_paths
         rm --force $path_to_pack
