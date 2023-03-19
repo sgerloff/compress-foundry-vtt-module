@@ -15,6 +15,7 @@ Afterwards you can easily install the necessary programs:
 cargo install nu
 cargo install sd
 cargo install ripgrep
+cargo install urlencode
 ```
 
 Furthermore, you will need to install googles [webp tools](https://developers.google.com/speed/webp/download), as images are compressed into the webp format:

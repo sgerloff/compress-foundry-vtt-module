@@ -2,10 +2,20 @@
 
 # '(")(?:[^"\\]|\\.)*(")' -> use rg
 
+def clean_paths [
+    input_string: string
+] {
+    if ($input_string | str contains "/") {
+        return ($input_string | str trim -c '"' | urlencode -d $in)
+    } else {
+        return ($input_string | str trim -c '"')
+    }
+}
+
 def extract_keys_and_values_from_json [
     path_to_json: string
 ] {
-    rg -o -e '"(?:[^"\\]|\\.)*"' $path_to_json | lines | each {str trim -c '"' | str replace -a "%20" " "}
+    rg -o -e '"(?:[^"\\]|\\.)*"' $path_to_json | lines | each {|in| clean_paths $in}
 }
 
 def extract_paths [
@@ -16,12 +26,14 @@ def extract_paths [
     let keys_and_values = extract_keys_and_values_from_json $path_to_json
     mut paths = []
     for v in $keys_and_values {
-        let relative_potential_path = do -i {$v | path relative-to $relative_path}
-        if ($relative_potential_path | describe | str contains string) {
-            let potential_path = ($basedir | path join $relative_potential_path)
-            if ($potential_path | path exists) {
-                if ($potential_path | path type | $in == file) {
-                    $paths = ($paths | append $potential_path)
+        if ($v | str contains "/") {
+            let relative_potential_path = do -i {$v | path relative-to $relative_path}
+            if ($relative_potential_path | describe | str contains string) {
+                let potential_path = ($basedir | path join $relative_potential_path)
+                if ($potential_path | path exists) {
+                    if ($potential_path | path type | $in == file) {
+                        $paths = ($paths | append $potential_path)
+                    }
                 }
             }
         }
@@ -44,12 +56,11 @@ def remove_playlists [
     let module = open $module_path
     let module_base_dir = ($module_path | path dirname)
 
+    mut to_remove_paths = []
+
     # Remove Playlist packs
     for playlist_packs in ($module.packs | where entity == Playlist) {
         let path_to_pack = ($module_base_dir | path join $playlist_packs.path)
-        let playlist_paths = extract_paths $path_to_pack $module_base_dir $"modules/($module.name)"
-        # Remove files
-        verbose_remove_files $playlist_paths
         rm --force $path_to_pack
     }
     # Remove entries from module.json
@@ -60,10 +71,6 @@ def remove_playlists [
         let path_to_pack = ($module_base_dir | path join $adventure_pack)
         let adventure = (open $path_to_pack | from json)
         if "playlists" in $adventure {
-            $adventure.playlists | save --force /tmp/adventure_playlist.json
-            let playlist_paths = extract_paths /tmp/adventure_playlist.json $module_base_dir $"modules/($module.name)"
-            # Remove playlist files
-            verbose_remove_files $playlist_paths
             $adventure | update playlists [] | save --force $path_to_pack
         }
     }
@@ -75,12 +82,11 @@ def remove_journals [
     let module = open $module_path
     let module_base_dir = ($module_path | path dirname)
 
+    mut to_remove_paths = []
+
     # Remove Journal packs
     for journal_packs in ($module.packs | where entity == JournalEntry) {
         let path_to_pack = ($module_base_dir | path join $journal_packs.path)
-        let journal_paths = extract_paths $path_to_pack $module_base_dir $"modules/($module.name)"
-        # Remove files
-        verbose_remove_files $journal_paths
         rm --force $path_to_pack
     }
     # Remove entries from module.json
@@ -91,11 +97,39 @@ def remove_journals [
         let path_to_pack = ($module_base_dir | path join $adventure_pack)
         let adventure = (open $path_to_pack | from json)
         if "journal" in $adventure {
-            $adventure.journal | save --force /tmp/adventure_journal.json
-            let journal_paths = extract_paths /tmp/adventure_journal.json $module_base_dir $"modules/($module.name)"
-            # Remove playlist files
-            verbose_remove_files $journal_paths
             $adventure | update journal [] | save --force $path_to_pack
+        }
+    }
+    return $to_remove_paths
+}
+
+def remove_unused [
+    module_path: string 
+] {
+    let module = open $module_path
+    let module_base_dir = ($module_path | path dirname)
+
+    let used_packs_paths = ($module.packs.path | each {|it| $module_base_dir | path join $it})
+    let packs_dir = ($module_base_dir | path join packs)
+    for pack_file in (fd -t f . $packs_dir) {
+        if not $pack_file in $used_packs_paths {
+            rm --force $pack_file
+        }
+    }
+
+    mut used_paths = $used_packs_paths
+    $used_paths = ($used_paths | append $module_path)
+
+    for used_pack in $used_packs_paths {
+        print $"Gather paths from ($used_pack)..."
+        let paths = extract_paths $used_pack $module_base_dir $"modules/($module.name)"
+        $used_paths = ($used_paths | append $paths)
+    }
+
+    for $file in (fd -t f . $module_base_dir | lines) {
+        if not $file in $used_paths {
+            print $"Remove unused file: ($file)"
+            rm --force $file
         }
     }
 }
@@ -106,10 +140,14 @@ def main [
     --playlist (-p) # keep playlists from module
     --journal (-j) # keep journals from module
 ] {
+    mut to_remove_paths = []
+
     if not $playlist {
         remove_playlists $module_path
     }
     if not $journal {
         remove_journals $module_path
     }
+
+    remove_unused $module_path
 }
