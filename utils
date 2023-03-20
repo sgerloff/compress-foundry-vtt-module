@@ -1,0 +1,45 @@
+# utils.nu
+
+export def extract_content_from_json [
+    path_to_json: string
+] {
+    rg -o -e '"(?:[^"\\]|\\.)*"' $path_to_json | lines | each { str trim -c '"' }
+}
+
+export def verbose_remove_files [
+    list_of_files
+] {
+    for file in $list_of_files {
+        print $"Remove: ($file)"
+        rm --force $file
+    }
+}
+
+export def compress_image_webp [
+    input_path: string
+    output_path: string
+    --quality: int = 25
+] {
+    cwebp -progress -short $input_path -o $output_path -q $quality
+}
+
+export def get_output_path_webp [
+    input_path: string
+] {
+    if ($input_path | str ends-with '.webp') {
+        (tempfile | lines | first)
+    } else {
+        ($input_path | path parse | update extension webp | path join)
+    }
+}
+
+export def is_image_file [
+    input_path: string
+] {
+    for extension in [".png", ".jpg", ".jpeg", ".webp"] {
+        if ($input_path | str contains $extension) {
+            return true
+        }
+    }
+    return false
+}
