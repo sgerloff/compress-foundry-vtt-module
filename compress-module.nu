@@ -41,11 +41,12 @@ def remove_components_from_module [
         $updated_module = ($updated_module | update packs ($module.packs | where entity != JournalEntry))
         # Remove components embedded in adventures
         for adventure_pack in ($module.packs | where entity == Adventure) {
-            let path_to_pack = ($module_base_dir | path join $adventure_pack)
-            let adventure = (open $path_to_pack | from json)
+            let path_to_pack = ($module_base_dir | path join $adventure_pack.path)
+            mut adventure = (open $path_to_pack | from json)
             if $component.adventure_field in $adventure {
-                $adventure | update journal [] | save --force $path_to_pack
+                $adventure = ($adventure | update $component.adventure_field [])
             }
+            $adventure | to json | save -f $path_to_pack
         }
     }
     return $updated_module
@@ -58,11 +59,12 @@ def remove_unused_packs [
 ] {
     let used_packs_paths = ($module.packs.path | each {|it| $module_base_dir | path join $it})
     let packs_dir = ($module_base_dir | path join packs)
-    for pack_file in (fd -t f . $packs_dir) {
+    for pack_file in (fd -t f . $packs_dir | lines) {
         if not $pack_file in $used_packs_paths {
             verbose_remove_files [$pack_file]
         }
     }
+    $module | update packs ($module.packs | filter {|it| $module_base_dir | path join $it.path | path exists})
 }
 
 def extract_used_paths [
@@ -77,8 +79,14 @@ def extract_used_paths [
 
     let used_packs_paths = ($module.packs.path | each {|it| $module_base_dir | path join $it})
     for used_pack in $used_packs_paths {
-        print $"Gather paths from ($used_pack)..."
-        let potential_paths = extract_paths $used_pack $"modules/($module.name)"
+
+        mut module_dir_name = ""
+        if ($module | get -i name | is-empty) {
+            $module_dir_name = $module.id
+        } else {
+            $module_dir_name = $module.name
+        }
+        let potential_paths = extract_paths $used_pack $"modules/($module_dir_name)"
 
         for potential_path in $potential_paths {
             let potential_decoded_path = ($module_base_dir | path join $potential_path | urlencode -d $in )
@@ -139,13 +147,24 @@ def compress_used_images [
 }
 
 def main [
-    module_path: string # path to module.json
+    module_url: string # path to module.json
+    --output-dir: string = "" # location for compressed module zip file
     --prefix: string = "" # if provided prepended to the title for easy grouping
     --quality: int = 25 # quality of webp images [0..100], where 100 is best
     --prepend-title: string = "" # prepend string to module title
     --playlist (-p) # keep playlists from module
     --journal (-j) # keep journals from module
 ] {
+    mut module = (http get $module_url | from json)
+
+    let download_dir = (mktemp -d)
+    let download_path = $"($download_dir)/module.zip"
+    let module_dir = $"($download_dir)/module"
+
+    curl -L -o $download_path $module.download
+    unzip -d $module_dir $download_path
+    let module_path = (fd module.json $module_dir)
+
     mut module = open $module_path
     let module_base_dir = ($module_path | path dirname)
 
@@ -169,7 +188,7 @@ def main [
     $module = ($module | reject download)
 
     # Remove unused packs
-    remove_unused_packs $module $module_base_dir
+    $module = (remove_unused_packs $module $module_base_dir)
 
     let module_files = (fd -t f . $module_base_dir | lines)
     let used_paths = (extract_used_paths $module $module_base_dir $module_files)
@@ -186,4 +205,16 @@ def main [
 
     # Save final module
     $module | save -f $module_path
+
+    let $current_dir = (pwd)
+    mut output_file = ""
+    if ($output_dir |  is-empty) {
+        $output_file = ($current_dir | path join $"($module.title).zip")
+    } else {
+        $output_file = ($output_dir | path join $"($module.title).zip")
+    }
+
+    cd $module_dir
+    ^zip -m -r $output_file .
+    cd $current_dir
 }
