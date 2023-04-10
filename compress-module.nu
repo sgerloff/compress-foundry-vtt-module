@@ -24,6 +24,22 @@ def extract_paths [
     return $paths | uniq
 }
 
+def rename_deprecated_fields [
+    module
+] {
+    mut updated_module = $module
+    mut updated_packs = []
+    for pack in $module.packs {
+        let updated_pack = ($pack | update path ($pack.path | str trim -l -c "/"))
+        if ("entity" in ($pack | columns)) {
+            $updated_packs = ($updated_packs | prepend ($updated_pack | rename -c [entity, type]))
+        } else {
+            $updated_packs = ($updated_packs | prepend $updated_pack)
+        }
+    }
+    $updated_module = ($updated_module | update "packs" $updated_packs)
+    return $updated_module
+}
 
 def remove_components_from_module [
     module,
@@ -33,14 +49,14 @@ def remove_components_from_module [
     mut updated_module = $module
     for component in $to_remove_components {
         # Remove related packs
-        for pack in ($module.packs | where entity == $component.pack_type) {
+        for pack in ($module.packs | where type == $component.pack_type) {
             let path_to_pack = ($module_base_dir | path join $pack.path)
             verbose_remove_files [$path_to_pack]
         }
         # Remove entries from module.json
-        $updated_module = ($updated_module | update packs ($module.packs | where entity != JournalEntry))
+        $updated_module = ($updated_module | update packs ($module.packs | where type != $component.pack_type))
         # Remove components embedded in adventures
-        for adventure_pack in ($module.packs | where entity == Adventure) {
+        for adventure_pack in ($module.packs | where type == Adventure) {
             let path_to_pack = ($module_base_dir | path join $adventure_pack.path)
             mut adventure = (open $path_to_pack | from json)
             if $component.adventure_field in $adventure {
@@ -117,9 +133,40 @@ def image_cleanup_step [
     }
 }
 
+def generate_preview_images [
+    used_paths,
+    module_base_dir : string,
+    prepend_string: string,
+    preview_path: string,
+    preview_size: int,
+    quality: int
+] {
+    mkdir $preview_path
+
+    let map_dirs = (["map", "scene"] | each {|it| fd -t d $it $module_base_dir | lines} | flatten)
+    let map_files = ($map_dirs | each {|it| fd -t f . $it | lines} | flatten)
+
+    for used_path in $used_paths {
+        if not ($used_path.abs_decoded_path | path exists) {
+            continue
+        }
+
+        if not (is_image_file $used_path.abs_decoded_path) {
+            continue
+        }
+
+        if $used_path.abs_decoded_path in $map_files {
+            print $"Generate preview for ($used_path.path)"
+            let output_file_name = ([$prepend_string, (basename $used_path.abs_decoded_path)] | str join "_" | path parse | update extension webp | path join)
+            cwebp -mt -progress -short -resize $preview_size 0 -q $quality $used_path.abs_decoded_path -o ($preview_path | path join $output_file_name)
+        }
+    }
+}
+
+
 def compress_used_images [
     used_paths,
-    module_base_dir
+    module_base_dir,
     quality: int 
 ] {
     for used_path in $used_paths {
@@ -151,9 +198,11 @@ def main [
     --output-dir: string = "" # location for compressed module zip file
     --prefix: string = "" # if provided prepended to the title for easy grouping
     --quality: int = 25 # quality of webp images [0..100], where 100 is best
-    --prepend-title: string = "" # prepend string to module title
+    --preview (-P): string = "" # generate previews and save to path
+    --preview-size (-S): int = 1000 # max size of preview images
     --playlist (-p) # keep playlists from module
     --journal (-j) # keep journals from module
+    --force (-f) # overwrite output file
 ] {
     mut module = (http get $module_url | from json)
 
@@ -178,6 +227,7 @@ def main [
     }
 
     # Clean up module
+    $module = (rename_deprecated_fields $module)
     $module = (remove_components_from_module $module $module_base_dir $to_remove_components)
     if not ($prefix | is-empty) {
         let new_title = ($module.title | prepend $"($prefix) - " | append " (compressed)" | str join)
@@ -200,6 +250,10 @@ def main [
         }
     }
 
+    if not ($preview |is-empty) {
+        generate_preview_images $used_paths $module_base_dir $module.title $preview $preview_size $quality
+    }
+
     # Compress referenced images
     compress_used_images $used_paths $module_base_dir $quality
 
@@ -215,6 +269,9 @@ def main [
     }
 
     cd $module_dir
-    ^zip -m -r $output_file .
+    if $force {
+        rm --force $output_file
+    }
+    ^zip -m -u -r $output_file .
     cd $current_dir
 }

@@ -20,7 +20,7 @@ export def compress_image_webp [
     output_path: string
     --quality: int = 25
 ] {
-    cwebp -progress -short $input_path -o $output_path -q $quality
+    cwebp -mt -progress -short $input_path -o $output_path -q $quality
 }
 
 export def get_output_path_webp [
@@ -42,4 +42,11 @@ export def is_image_file [
         }
     }
     return false
+}
+
+export def save_path_join [
+    base_path: string
+    join_path: string
+] {
+    $base_path | path join ($join_path | str trim -l -c "/")
 }
