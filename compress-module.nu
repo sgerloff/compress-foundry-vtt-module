@@ -62,7 +62,7 @@ def remove_components_from_module [
             if $component.adventure_field in $adventure {
                 $adventure = ($adventure | update $component.adventure_field [])
             }
-            $adventure | to json | save -f $path_to_pack
+            $adventure | to json -r | save -f $path_to_pack
         }
     }
     return $updated_module
@@ -212,6 +212,7 @@ def main [
 
     curl -L -o $download_path $module.download
     unzip -d $module_dir $download_path
+    chmod -R 777 $module_dir
     let module_path = (fd module.json $module_dir)
 
     mut module = open $module_path
@@ -263,15 +264,13 @@ def main [
     let $current_dir = (pwd)
     mut output_file = ""
     if ($output_dir |  is-empty) {
-        $output_file = ($current_dir | path join $"($module.title).zip")
+        $output_file = ($current_dir | path join $module.title)
     } else {
-        $output_file = ($output_dir | path join $"($module.title).zip")
+        $output_file = ($output_dir | path join $module.title)
     }
 
-    cd $module_dir
     if $force {
-        rm --force $output_file
+        rm -rf $output_file
     }
-    ^zip -m -u -r $output_file .
-    cd $current_dir
+    mv $module_base_dir $output_file
 }

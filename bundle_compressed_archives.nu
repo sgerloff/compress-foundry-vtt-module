@@ -11,6 +11,7 @@ def main [
         print $zip_file
         let extract_dir = ($source_dir | path join ($zip_file | path parse | $in.stem))
         unzip -d $extract_dir $zip_file
-        ^zip -m -u -r $output $extract_dir
+        chmod -R 777 $extract_dir
+        do -i {^zip -m -u -r $output $extract_dir}
     }
 }
