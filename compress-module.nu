@@ -18,10 +18,9 @@ def extract_paths [
         if ($relative_potential_path | is-empty) {
             continue
         }
-
         $paths = ($paths | append $relative_potential_path)
     }
-    return $paths | uniq
+    return ($paths | uniq)
 }
 
 def rename_deprecated_fields [
